@@ -22,7 +22,7 @@ namespace CSGO_DemoPars
             MatchData matchData = new MatchData();
 
             long matchID = 0, ctID = 0, tID = 0;
-            bool hasMatchStarted = false;
+            bool hasMatchStarted = false, isFreezetimeOver = false;
             int ctStartroundMoney = 0, tStartroundMoney = 0, ctEquipValue = 0, tEquipValue = 0, ctSaveAmount = 0, tSaveAmount = 0, round = 0;
             float roundStartTime = 0;
             RoundData roundData = new RoundData();
@@ -81,6 +81,7 @@ namespace CSGO_DemoPars
                         if (!hasMatchStarted)
                             return;
 
+                        isFreezetimeOver = false;
                         roundData.newRound();
                         round++;
                         roundStartTime = demoParser.CurrentTime;
@@ -136,6 +137,7 @@ namespace CSGO_DemoPars
                         if (!hasMatchStarted)
                             return;
 
+                        isFreezetimeOver = true;
                         ctEquipValue = demoParser.Participants.Where(a => a.Team == Team.CounterTerrorist).Sum(a => a.CurrentEquipmentValue);
                         tEquipValue = demoParser.Participants.Where(a => a.Team == Team.Terrorist).Sum(a => a.CurrentEquipmentValue);
                     };
@@ -180,19 +182,19 @@ namespace CSGO_DemoPars
 
                     demoParser.TickDone += (sender, e) =>
                     {
-                        if (!hasMatchStarted)
+                        if (!hasMatchStarted || !isFreezetimeOver)
                             return;
 
                         foreach (Player p in demoParser.PlayingParticipants.ToList())
                         {
-                            
                             PositionData tickPositionData = new PositionData();
                             tickPositionData.MatchID = matchID;
                             tickPositionData.SteamID = p.SteamID;
                             tickPositionData.Tick = demoParser.CurrentTick;
-                            tickPositionData.Position = p.Position;
+                            tickPositionData.Position = new Vector(p.Position.X, p.Position.Y, p.Position.Z);
                             tickPositionData.ViewDirection = new Vector(p.ViewDirectionX, p.ViewDirectionY, 0);
                             positionData.Add(tickPositionData);
+                            var strh = positionData.Where(ps => ps.SteamID == 76561198004011311 && ps.MatchID == 1);
                         }
                     };
 
@@ -223,9 +225,11 @@ namespace CSGO_DemoPars
                 }
             }
         }
+
         public void setDatabase(Database database)
         {
             this.database = database;
+            this.database = new Database();
         }
     }
 }

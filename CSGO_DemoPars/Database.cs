@@ -12,7 +12,7 @@ namespace CSGO_DemoPars
 {
     class Database
     {
-        private static readonly object syncLock = new Object();
+        private MySqlTransaction transaction;
         private String dbName = "csgopars";
         MySqlConnection connection;
         MySqlCommand matchesCmd, roundsCmd, playersCmd, teamCmd, killsCmd, grenadeCmd, movementCmd;
@@ -56,7 +56,7 @@ namespace CSGO_DemoPars
 
         ~Database()
         {
-            connection.Clone();
+            connection.Close();
         }
 
         private void setupDatabase()
@@ -187,7 +187,6 @@ namespace CSGO_DemoPars
             foreignKeyChecks.ExecuteNonQuery();
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public long insertMatch(MatchData matchData)
         {
             matchesCmd.Parameters.AddWithValue("@matchDate", matchData.MatchTime);
@@ -201,7 +200,6 @@ namespace CSGO_DemoPars
             return getMatchByDateAndTeams(matchData.MatchTime, matchData.Team1, matchData.Team2);
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public long insertRound(RoundData roundData)
         {
             roundsCmd.Parameters.AddWithValue("@matchID", roundData.MatchID);
@@ -218,7 +216,6 @@ namespace CSGO_DemoPars
             return roundsCmd.LastInsertedId;
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public void insertPlayer(PlayerData player)
         {
             playersCmd.Parameters.AddWithValue("@steamID", player.SteamID);
@@ -228,7 +225,6 @@ namespace CSGO_DemoPars
             playersCmd.Parameters.Clear();
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public long insertTeam(TeamData team)
         {
             teamCmd.Parameters.AddWithValue("@teamName", team.TeamName);
@@ -238,7 +234,6 @@ namespace CSGO_DemoPars
             return getTeamByName(team.TeamName);
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public void insertKill(KillData kill)
         {
             killsCmd.Parameters.AddWithValue("@matchID", kill.MatchID);
@@ -256,7 +251,6 @@ namespace CSGO_DemoPars
             killsCmd.Parameters.Clear();
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public void insertPosition(List<PositionData> positionData)
         {
             StringBuilder builder = new StringBuilder(@"INSERT IGNORE INTO `movement` (MatchID, PlayerID, Tick, PositionX, PositionY, PositionZ, ViewDirectionX, ViewDirectionY) VALUES ");
@@ -284,7 +278,6 @@ namespace CSGO_DemoPars
             movementCmd.Parameters.Clear();
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public int getPlayerBySteamID(long steamID)
         {
             MySqlCommand queryPlayerID = connection.CreateCommand();
@@ -304,7 +297,6 @@ namespace CSGO_DemoPars
             return id;
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public long getMatchByDateAndTeams(DateTime mt, long team1ID, long team2ID)
         {
             MySqlCommand queryMatchID = connection.CreateCommand();
@@ -326,7 +318,6 @@ namespace CSGO_DemoPars
             return id;
         }
 
-        [MethodImpl(MethodImplOptions.Synchronized)]
         public long getTeamByName(String name)
         {
             MySqlCommand queryTeamID = connection.CreateCommand();
