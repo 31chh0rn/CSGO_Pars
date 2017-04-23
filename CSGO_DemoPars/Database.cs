@@ -3,14 +3,19 @@ using System.Configuration;
 using MySql.Data.MySqlClient;
 using CSGO_DemoPars.Model;
 using System.Runtime.CompilerServices;
+using DemoInfo;
+using System.Collections.Generic;
+using System.Text;
+using System.Globalization;
 
 namespace CSGO_DemoPars
 {
     class Database
     {
+        private static readonly object syncLock = new Object();
         private String dbName = "csgopars";
         MySqlConnection connection;
-        MySqlCommand matchesCmd, roundsCmd, playersCmd, teamCmd, killsCmd, grenadeCmd;
+        MySqlCommand matchesCmd, roundsCmd, playersCmd, teamCmd, killsCmd, grenadeCmd, movementCmd;
 
         public Database()
         {
@@ -29,8 +34,12 @@ namespace CSGO_DemoPars
                                                    VALUES (@steamID, @playerName)";
 
             teamCmd = connection.CreateCommand();
-            teamCmd.CommandText = @"INSERT IGNORE `teams` (Name) 
+            teamCmd.CommandText = @"INSERT IGNORE INTO `teams` (Name) 
                                                    VALUES (@teamName)";
+
+            movementCmd = connection.CreateCommand();
+            movementCmd.CommandText = @"INSERT IGNORE INTO `movement` (MatchID, PlayerID, Tick, PositionX, PositionY, PositionZ, ViewDirectionX, ViewDirectionY) 
+                                                   VALUES (@matchID, @playerID, @tick, @positionX, @positionY, @positionZ, @viewDirectionX, @viewDirectionY)";
 
             roundsCmd = connection.CreateCommand();
             roundsCmd.CommandText = @"INSERT IGNORE INTO `rounds` (MatchID, Round, RoundTime, WinnerID, PlantTime, PlantedSite, DefuseTime) 
@@ -41,7 +50,7 @@ namespace CSGO_DemoPars
                                                  VALUES (@matchID, @roundID, @killerID, @victimID, @assisterID, @roundTime)";
 
             grenadeCmd = connection.CreateCommand();
-            grenadeCmd.CommandText = @"INSERT IGNORE `team` (matchID, round, winn, type, throwTime) 
+            grenadeCmd.CommandText = @"INSERT IGNORE INTO `team` (matchID, round, winn, type, throwTime) 
                                                    VALUES (@round, @thrownByPlayerID, @type, @throwTime)";
         }
 
@@ -88,6 +97,24 @@ namespace CSGO_DemoPars
                     PRIMARY KEY(`ID`),
                     UNIQUE INDEX `Name` (`Name`)
                 ) COLLATE = 'utf8_general_ci' ENGINE = InnoDB;";
+
+            MySqlCommand createMovementTable = connection.CreateCommand();
+            createMovementTable.CommandText = String.Format("USE {0};", dbName) +
+                @"CREATE TABLE IF NOT EXISTS `movement` (
+	                `ID` INT NOT NULL AUTO_INCREMENT,
+	                `MatchID` INT NULL,
+	                `PlayerID` BIGINT NULL,
+	                `Tick` INT NULL,
+	                `PositionX` FLOAT NULL DEFAULT NULL,
+	                `PositionY` FLOAT NULL DEFAULT NULL,
+	                `PositionZ` FLOAT NULL DEFAULT NULL,
+                    `ViewDirectionX` FLOAT NULL DEFAULT NULL,
+                    `ViewDirectionY` FLOAT NULL DEFAULT NULL,
+	                UNIQUE INDEX `PlayerID_MatchID_Tick` (`PlayerID`, `MatchID`, `Tick`),
+	                PRIMARY KEY (`ID`),
+	                CONSTRAINT `MovementPlayerID` FOREIGN KEY (`PlayerID`) REFERENCES `players` (`SteamID`),
+	                CONSTRAINT `MovementMatchID` FOREIGN KEY (`MatchID`) REFERENCES `matches` (`ID`)
+                ) COLLATE='utf8_general_ci' ENGINE=InnoDB;";
 
             MySqlCommand createPlayerTeamTable = connection.CreateCommand();
             createPlayerTeamTable.CommandText = String.Format("USE {0};", dbName) +
@@ -151,6 +178,7 @@ namespace CSGO_DemoPars
             createMatchTable.ExecuteNonQuery();
             createPlayerTable.ExecuteNonQuery();
             createTeamTable.ExecuteNonQuery();
+            createMovementTable.ExecuteNonQuery();
             createPlayerTeamTable.ExecuteNonQuery();
             createRoundTable.ExecuteNonQuery();
             createkillsTable.ExecuteNonQuery();
@@ -213,7 +241,6 @@ namespace CSGO_DemoPars
         [MethodImpl(MethodImplOptions.Synchronized)]
         public void insertKill(KillData kill)
         {
-            //TODO: assister null
             killsCmd.Parameters.AddWithValue("@matchID", kill.MatchID);
             killsCmd.Parameters.AddWithValue("@roundID", kill.RoundID);
             int killerID = getPlayerBySteamID(kill.KillerID);
@@ -227,6 +254,34 @@ namespace CSGO_DemoPars
 
             killsCmd.ExecuteNonQuery();
             killsCmd.Parameters.Clear();
+        }
+
+        [MethodImpl(MethodImplOptions.Synchronized)]
+        public void insertPosition(List<PositionData> positionData)
+        {
+            StringBuilder builder = new StringBuilder(@"INSERT IGNORE INTO `movement` (MatchID, PlayerID, Tick, PositionX, PositionY, PositionZ, ViewDirectionX, ViewDirectionY) VALUES ");
+
+            List<string> rows = new List<string>();
+            CultureInfo decimalFormat = CultureInfo.GetCultureInfoByIetfLanguageTag("en-US");
+            foreach (PositionData pos in positionData)
+            {
+                rows.Add(string.Format("({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})", 
+                    MySqlHelper.EscapeString(pos.MatchID.ToString()), 
+                    MySqlHelper.EscapeString(pos.SteamID.ToString()), 
+                    MySqlHelper.EscapeString(pos.Tick.ToString()), 
+                    MySqlHelper.EscapeString(pos.Position.X.ToString("G9", decimalFormat)), 
+                    MySqlHelper.EscapeString(pos.Position.Y.ToString("G9", decimalFormat)), 
+                    MySqlHelper.EscapeString(pos.Position.Z.ToString("G9", decimalFormat)), 
+                    MySqlHelper.EscapeString(pos.ViewDirection.X.ToString("G9", decimalFormat)), 
+                    MySqlHelper.EscapeString(pos.ViewDirection.Y.ToString("G9", decimalFormat))
+                ));
+            }
+            builder.Append(string.Join(",", rows)).Append(";");
+
+            movementCmd = connection.CreateCommand();
+            movementCmd.CommandText = builder.ToString();
+            movementCmd.ExecuteNonQuery();
+            movementCmd.Parameters.Clear();
         }
 
         [MethodImpl(MethodImplOptions.Synchronized)]

@@ -28,6 +28,7 @@ namespace CSGO_DemoPars
             RoundData roundData = new RoundData();
             List<Player> players = new List<Player>();
             List<KillData> roundKills = new List<KillData>();
+            List<PositionData> positionData = new List<PositionData>();
 
             File.SetAttributes(file.FullName, FileAttributes.Normal);
             using (var mmf = MemoryMappedFile.CreateFromFile(file.FullName))
@@ -181,6 +182,18 @@ namespace CSGO_DemoPars
                     {
                         if (!hasMatchStarted)
                             return;
+
+                        foreach (Player p in demoParser.PlayingParticipants.ToList())
+                        {
+                            
+                            PositionData tickPositionData = new PositionData();
+                            tickPositionData.MatchID = matchID;
+                            tickPositionData.SteamID = p.SteamID;
+                            tickPositionData.Tick = demoParser.CurrentTick;
+                            tickPositionData.Position = p.Position;
+                            tickPositionData.ViewDirection = new Vector(p.ViewDirectionX, p.ViewDirectionY, 0);
+                            positionData.Add(tickPositionData);
+                        }
                     };
 
                     demoParser.RoundEnd += (sender, e) =>
@@ -197,6 +210,8 @@ namespace CSGO_DemoPars
                             kill.RoundID = id;
                             database.insertKill(kill);
                         }
+                        database.insertPosition(positionData);
+                        positionData.Clear();
                     };
 
                     demoParser.WinPanelMatch += (sender, e) =>
