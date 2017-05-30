@@ -275,6 +275,7 @@ namespace CSGO_DemoPars
                             kill.RoundID = id;
                             database.insertKill(kill);
                         }
+                        roundKills.Clear();
 
                         if (lastRoundHalf) {
                             long temp = ctID;
