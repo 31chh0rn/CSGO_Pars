@@ -1,4 +1,5 @@
-﻿using DemoInfo;
+﻿using CSGO_DemoPars.Utils;
+using DemoInfo;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,8 +13,8 @@ namespace CSGO_DemoPars.Model
         private long matchID;
         private long steamID;
         private long tick;
-        private Vector position;
-        private Vector viewDirection;
+        private MyVector position;
+        private MyVector viewDirection;
 
         public long MatchID
         {
@@ -33,13 +34,13 @@ namespace CSGO_DemoPars.Model
             set { tick = value; }
         }
 
-        public Vector Position
+        public MyVector Position
         {
             get { return position; }
             set { position = value; }
         }
 
-        public Vector ViewDirection
+        public MyVector ViewDirection
         {
             get { return viewDirection; }
             set { viewDirection = value; }

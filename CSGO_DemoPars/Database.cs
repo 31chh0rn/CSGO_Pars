@@ -2,8 +2,6 @@
 using System.Configuration;
 using MySql.Data.MySqlClient;
 using CSGO_DemoPars.Model;
-using System.Runtime.CompilerServices;
-using DemoInfo;
 using System.Collections.Generic;
 using System.Text;
 using System.Globalization;
@@ -15,7 +13,7 @@ namespace CSGO_DemoPars
         private MySqlTransaction transaction;
         private String dbName = "csgopars";
         MySqlConnection connection;
-        MySqlCommand matchesCmd, roundsCmd, playersCmd, teamCmd, killsCmd, grenadeCmd, movementCmd;
+        MySqlCommand matchesCmd, roundsCmd, playersCmd, teamCmd, matchTeamCmd, killsCmd, grenadeCmd, movementCmd, playerTeamCmd;
 
         public Database()
         {
@@ -26,24 +24,24 @@ namespace CSGO_DemoPars
             setupDatabase();
 
             matchesCmd = connection.CreateCommand();
-            matchesCmd.CommandText = @"INSERT IGNORE INTO matches (Date, Map, Team1, Team2) 
-                                                   VALUES (@matchDate, @map, @team1ID, @team2ID)";
+            matchesCmd.CommandText = @"INSERT IGNORE INTO matches (Date, Map) VALUES (@matchDate, @map)";
 
             playersCmd = connection.CreateCommand();
-            playersCmd.CommandText = @"INSERT IGNORE INTO `players` (SteamID, Name) 
-                                                   VALUES (@steamID, @playerName)";
+            playersCmd.CommandText = @"INSERT IGNORE INTO `players` (SteamID, Name) VALUES (@steamID, @playerName)";
 
             teamCmd = connection.CreateCommand();
-            teamCmd.CommandText = @"INSERT IGNORE INTO `teams` (Name) 
-                                                   VALUES (@teamName)";
+            teamCmd.CommandText = @"INSERT IGNORE INTO `teams` (Name) VALUES (@teamName)";
+
+            matchTeamCmd = connection.CreateCommand();
+            matchTeamCmd.CommandText = @"INSERT IGNORE INTO `matchTeam` (MatchID, TeamID) VALUES (@matchID, @teamID)";
 
             movementCmd = connection.CreateCommand();
             movementCmd.CommandText = @"INSERT IGNORE INTO `movement` (MatchID, PlayerID, Tick, PositionX, PositionY, PositionZ, ViewDirectionX, ViewDirectionY) 
                                                    VALUES (@matchID, @playerID, @tick, @positionX, @positionY, @positionZ, @viewDirectionX, @viewDirectionY)";
 
             roundsCmd = connection.CreateCommand();
-            roundsCmd.CommandText = @"INSERT IGNORE INTO `rounds` (MatchID, Round, RoundTime, WinnerID, PlantTime, PlantedSite, DefuseTime) 
-                                                  VALUES (@matchID, @round, @roundTime, @winnerID, @plantTime, @plantedSite, @defuseTime)";
+            roundsCmd.CommandText = @"INSERT IGNORE INTO `rounds` (MatchID, Round, RoundTime, WinnerID, WinnerSide, PlantTime, PlantedSite, DefuseTime) 
+                                                  VALUES (@matchID, @round, @roundTime, @winnerID, @winnerSide, @plantTime, @plantedSite, @defuseTime)";
 
             killsCmd = connection.CreateCommand();
             killsCmd.CommandText = @"INSERT IGNORE INTO `kills` (matchID, roundID, killerID, victimID, assisterID, roundTime) 
@@ -52,6 +50,10 @@ namespace CSGO_DemoPars
             grenadeCmd = connection.CreateCommand();
             grenadeCmd.CommandText = @"INSERT IGNORE INTO `team` (matchID, round, winn, type, throwTime) 
                                                    VALUES (@round, @thrownByPlayerID, @type, @throwTime)";
+
+            playerTeamCmd = connection.CreateCommand();
+            playerTeamCmd.CommandText = @"INSERT IGNORE INTO `playerteam` (matchID, playerID, teamID) 
+                                                   VALUES (@matchID, @playerID, @teamID)";
         }
 
         ~Database()
@@ -71,12 +73,7 @@ namespace CSGO_DemoPars
                     `ID` INT NOT NULL AUTO_INCREMENT,
 	                `Date` DATETIME NULL,
 	                `Map` VARCHAR(50) NULL,
-                    `Team1` INT NULL,
-                    `Team2` INT NULL,
-	                PRIMARY KEY (`ID`),
-                    UNIQUE INDEX `MatchesDateTeam1Team2` (`Date`, `Team1`, `Team2`),
-                    CONSTRAINT `MatchesTeam1` FOREIGN KEY (`Team1`) REFERENCES `teams` (`ID`),
-	                CONSTRAINT `MatchesTeam2` FOREIGN KEY (`Team2`) REFERENCES `teams` (`ID`)
+	                PRIMARY KEY (`ID`)
                 ) COLLATE='utf8_general_ci' ENGINE = InnoDB;";
 
             MySqlCommand createPlayerTable = connection.CreateCommand();
@@ -136,6 +133,7 @@ namespace CSGO_DemoPars
                     `Round` INT NULL,
                     `RoundTime` INT NULL,
                     `WinnerID` INT NULL,
+                    `WinnerSide` INT NULL,
                     `PlantTime` INT NULL,
                     `PlantedSite` CHAR(1) NULL,
                     `DefuseTime` INT NULL,
@@ -171,6 +169,18 @@ namespace CSGO_DemoPars
                     CONSTRAINT `KillAssisterID` FOREIGN KEY (`AssisterID`) REFERENCES `rounds` (`ID`)
                 ) COLLATE='utf8_general_ci' ENGINE=InnoDB;";
 
+            MySqlCommand creatematchTeamTable = connection.CreateCommand();
+            creatematchTeamTable.CommandText = String.Format("USE {0};", dbName) +
+                @"CREATE TABLE IF NOT EXISTS  `matchTeam` (
+	                `MatchID` INT(11) NOT NULL,
+	                `TeamID` INT(11) NOT NULL,
+                    PRIMARY KEY(`MatchID`, `TeamID`),
+	                INDEX `FK_Team` (`TeamID`),
+	                CONSTRAINT `FK_MatchID` FOREIGN KEY (`MatchID`) REFERENCES `matches` (`ID`),
+	                CONSTRAINT `FK_Team` FOREIGN KEY (`TeamID`) REFERENCES `teams` (`ID`)
+                ) COLLATE='utf8_general_ci' ENGINE = InnoDB;";
+
+
             MySqlCommand foreignKeyChecks = connection.CreateCommand();
             foreignKeyChecks.CommandText = "SET FOREIGN_KEY_CHECKS = 0;";
 
@@ -182,22 +192,37 @@ namespace CSGO_DemoPars
             createPlayerTeamTable.ExecuteNonQuery();
             createRoundTable.ExecuteNonQuery();
             createkillsTable.ExecuteNonQuery();
+            creatematchTeamTable.ExecuteNonQuery();
 
             foreignKeyChecks.CommandText = "SET FOREIGN_KEY_CHECKS = 1;";
             foreignKeyChecks.ExecuteNonQuery();
         }
 
+        private void insertMatchTeam(long matchID, long teamID)
+        {
+            matchTeamCmd.Parameters.AddWithValue("@matchID", matchID);
+            matchTeamCmd.Parameters.AddWithValue("@teamID", teamID);
+            matchTeamCmd.ExecuteNonQuery();
+            matchTeamCmd.Parameters.Clear();
+        }
+
         public long insertMatch(MatchData matchData)
         {
+            long matchID = getMatchByDateAndTeam(matchData.MatchTime, matchData.Team1);
+            if (matchID != 0)
+                return matchID;
+
             matchesCmd.Parameters.AddWithValue("@matchDate", matchData.MatchTime);
             matchesCmd.Parameters.AddWithValue("@map", matchData.Map);
-            matchesCmd.Parameters.AddWithValue("@team1ID", matchData.Team1);
-            matchesCmd.Parameters.AddWithValue("@team2ID", matchData.Team2);
 
             matchesCmd.ExecuteNonQuery();
             matchesCmd.Parameters.Clear();
 
-            return getMatchByDateAndTeams(matchData.MatchTime, matchData.Team1, matchData.Team2);
+            matchID = matchesCmd.LastInsertedId;
+            insertMatchTeam(matchID, matchData.Team1);
+            insertMatchTeam(matchID, matchData.Team2);
+
+            return matchID;
         }
 
         public long insertRound(RoundData roundData)
@@ -206,6 +231,7 @@ namespace CSGO_DemoPars
             roundsCmd.Parameters.AddWithValue("@round", roundData.Round);
             roundsCmd.Parameters.AddWithValue("@roundTime", roundData.RoundEndTime - roundData.RoundStartTime);
             roundsCmd.Parameters.AddWithValue("@winnerID", roundData.Winner);
+            roundsCmd.Parameters.AddWithValue("@winnerSide", (long)roundData.WinnerSide);
             roundsCmd.Parameters.AddWithValue("@plantTime", roundData.PlantTime);
             roundsCmd.Parameters.AddWithValue("@plantedSite", roundData.PlantedSite);
             roundsCmd.Parameters.AddWithValue("@defuseTime", roundData.DefuseTime);
@@ -232,6 +258,17 @@ namespace CSGO_DemoPars
             teamCmd.Parameters.Clear();
 
             return getTeamByName(team.TeamName);
+        }
+
+        public void insertPlayerTeam(long matchID, long teamID, long playerSteamID)
+        {
+            long playerID = getPlayerBySteamID(playerSteamID);
+            playerTeamCmd.Parameters.AddWithValue("@matchID", matchID);
+            playerTeamCmd.Parameters.AddWithValue("@teamID", teamID);
+            playerTeamCmd.Parameters.AddWithValue("@playerID", playerID);
+
+            playerTeamCmd.ExecuteNonQuery();
+            playerTeamCmd.Parameters.Clear();
         }
 
         public void insertKill(KillData kill)
@@ -297,13 +334,13 @@ namespace CSGO_DemoPars
             return id;
         }
 
-        public long getMatchByDateAndTeams(DateTime mt, long team1ID, long team2ID)
+        public long getMatchByDateAndTeam(DateTime mt, long teamID)
         {
             MySqlCommand queryMatchID = connection.CreateCommand();
-            queryMatchID.CommandText = "SELECT ID FROM `matches` WHERE Date = @matchTime AND (Team1 = @team1ID OR Team1 = @team2ID) AND (Team2 = @team1ID OR Team2 = @team2ID);";
+            
+            queryMatchID.CommandText = "SELECT ID FROM `matches` m INNER JOIN `matchteam` mt ON m.ID = mt.MatchID WHERE m.Date = @matchTime AND mt.TeamID = @teamID";
             queryMatchID.Parameters.AddWithValue("@matchTime", new DateTime(mt.Year, mt.Month, mt.Day, mt.Hour, mt.Minute, mt.Second));
-            queryMatchID.Parameters.AddWithValue("@team1ID", team1ID);
-            queryMatchID.Parameters.AddWithValue("@team2ID", team2ID);
+            queryMatchID.Parameters.AddWithValue("@teamID", teamID);
             queryMatchID.ExecuteNonQuery();
 
             long id = 0;

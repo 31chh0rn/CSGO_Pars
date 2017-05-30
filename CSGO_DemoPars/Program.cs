@@ -2,6 +2,7 @@
 using System.Threading.Tasks;
 using System.Reflection;
 using System.IO;
+using System.Threading;
 
 namespace CSGO_DemoPars
 {
@@ -29,7 +30,7 @@ namespace CSGO_DemoPars
                 Console.WriteLine(e.Message);
                 return;
             }
-            Console.SetOut(writer);
+            //Console.SetOut(writer);
 
             //placeholder variables for database inputs that are not in the demo
             DateTime matchTime = DateTime.Now;
@@ -45,13 +46,14 @@ namespace CSGO_DemoPars
                 Console.WriteLine(e.Message);
             }
 
+            int reservedLine = -1;
             Database database = new Database();
             // Parallel approach as reading different files are independent tasks
-            Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 4 }, file =>
+            Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 1 }, file =>
             {
                 Parser parser = new Parser();
                 parser.setDatabase(database);
-                parser.parserFile(file);
+                parser.parserFile(file, Interlocked.Increment(ref reservedLine));
             });
         }
 

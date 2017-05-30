@@ -9,11 +9,13 @@ namespace CSGO_DemoPars.Model
     class TeamData
     {
         private string teamName;
-
+        private List<long> players;
         public string TeamName
         {
             get { return teamName; }
             set { teamName = value; }
         }
+
+        public List<long> Players { get => players; set => players = value; }
     }
 }

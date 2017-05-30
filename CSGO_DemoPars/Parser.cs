@@ -6,15 +6,26 @@ using MySql.Data.MySqlClient;
 using System.IO.MemoryMappedFiles;
 using CSGO_DemoPars.Model;
 using System.IO;
+using CSGO_DemoPars.Utils;
 
 namespace CSGO_DemoPars
 {
     class Parser
     {
+        private String fileName;
+        private int reservedLine; // For console progress
         private Database database;
+        private List<RoundData> roundData;
+        private Dictionary<long, MyVector> position;
+        private Dictionary<long, MyVector> viewDirection;
 
-        public void parserFile(System.IO.FileInfo file)
+        public void parserFile(System.IO.FileInfo file, int reservedLine)
         {
+            this.fileName = file.Name;
+            this.reservedLine = reservedLine;
+            roundData = new List<RoundData>();
+            position = new Dictionary<long, MyVector>();
+            viewDirection = new Dictionary<long, MyVector>();
             parserFile(file, file.CreationTime);
         }
 
@@ -22,10 +33,10 @@ namespace CSGO_DemoPars
             MatchData matchData = new MatchData();
 
             long matchID = 0, ctID = 0, tID = 0;
-            bool hasMatchStarted = false, isFreezetimeOver = false;
-            int ctStartroundMoney = 0, tStartroundMoney = 0, ctEquipValue = 0, tEquipValue = 0, ctSaveAmount = 0, tSaveAmount = 0, round = 0;
+            bool hasMatchStarted = false, isFreezetimeOver = false, lastRoundHalf = false;
+            int ctStartroundMoney = 0, tStartroundMoney = 0, ctEquipValue = 0, tEquipValue = 0, ctSaveAmount = 0, tSaveAmount = 0, currentRound = 0;
             float roundStartTime = 0;
-            RoundData roundData = new RoundData();
+            RoundData round = new RoundData();
             List<Player> players = new List<Player>();
             List<KillData> roundKills = new List<KillData>();
             List<PositionData> positionData = new List<PositionData>();
@@ -64,15 +75,49 @@ namespace CSGO_DemoPars
                             }
                             TeamData teamData = new TeamData();
                             teamData.TeamName = teamName;
+                            
                             return database.insertTeam(teamData);
                         };
 
-                        long team1ID = addTeam(demoParser.TClanName, Team.Terrorist);
-                        long team2ID = addTeam(demoParser.CTClanName, Team.CounterTerrorist);
+                        //How much money had each team at the start of the round?
+                        ctStartroundMoney = demoParser.Participants.Where(a => a.Team == Team.CounterTerrorist).Sum(a => a.Money);
+                        tStartroundMoney = demoParser.Participants.Where(a => a.Team == Team.Terrorist).Sum(a => a.Money);
 
-                        matchData.Team1 = team1ID;
-                        matchData.Team2 = team2ID;
+                        //And how much they did they save from the last round?
+                        ctSaveAmount = demoParser.Participants.Where(a => a.Team == Team.CounterTerrorist && a.IsAlive).Sum(a => a.CurrentEquipmentValue);
+                        tSaveAmount = demoParser.Participants.Where(a => a.Team == Team.Terrorist && a.IsAlive).Sum(a => a.CurrentEquipmentValue);
+
+                        tID = addTeam(demoParser.TClanName, Team.Terrorist);
+                        ctID = addTeam(demoParser.CTClanName, Team.CounterTerrorist);
+
+                        matchData.Team1 = tID;
+                        matchData.Team2 = ctID;
                         matchID = database.insertMatch(matchData);
+
+                        foreach (var p in demoParser.PlayingParticipants.ToList())
+                        {
+                            if (p.Team == Team.CounterTerrorist)
+                                database.insertPlayerTeam(matchID, ctID, p.SteamID);
+                            else if (p.Team == Team.Terrorist)
+                                database.insertPlayerTeam(matchID, tID, p.SteamID);
+                        }
+
+                        // RoundStart is called before MatchStarted, pull this into a extra function
+                        round.newRound();
+                        currentRound++;
+                        roundStartTime = demoParser.CurrentTime;
+
+                        round.CtID = ctID;
+                        round.TID = tID;
+                        round.MatchID = matchID;
+                        round.RoundStartTime = roundStartTime;
+                        round.Round = currentRound;
+                        // -------------------------------------------------------------------------
+                    };
+
+                    demoParser.LastRoundHalf += (sender, e) =>
+                    {
+                        lastRoundHalf = true;
                     };
 
                     //TODO: Get real Match start (chat search for game is live?)
@@ -82,15 +127,15 @@ namespace CSGO_DemoPars
                             return;
 
                         isFreezetimeOver = false;
-                        roundData.newRound();
-                        round++;
+                        round.newRound();
+                        currentRound++;
                         roundStartTime = demoParser.CurrentTime;
 
-                        roundData.MatchID = matchID;
-                        roundData.RoundStartTime = roundStartTime;
-                        roundData.Round = round;
-                        roundData.CtID = database.getTeamByName(demoParser.CTClanName);
-                        roundData.TID = database.getTeamByName(demoParser.TClanName);
+                        round.CtID = ctID;
+                        round.TID = tID;
+                        round.MatchID = matchID;
+                        round.RoundStartTime = roundStartTime;
+                        round.Round = currentRound;
 
                         //How much money had each team at the start of the round?
                         ctStartroundMoney = demoParser.Participants.Where(a => a.Team == Team.CounterTerrorist).Sum(a => a.Money);
@@ -109,9 +154,13 @@ namespace CSGO_DemoPars
                         Action<Player> addPlayer = (Player p) => {
                             PlayerData player = new PlayerData();
                             player.SteamID = p.SteamID;
-                            player.SteamID = p.SteamID;
 
                             database.insertPlayer(player);
+                            if (p.Team == Team.CounterTerrorist)
+                                database.insertPlayerTeam(matchID, ctID, p.SteamID);
+                            else if (p.Team == Team.Terrorist)
+                                database.insertPlayerTeam(matchID, tID, p.SteamID);
+
                         };
 
                         // Check for players that werde not ingame when the game started.
@@ -147,8 +196,8 @@ namespace CSGO_DemoPars
                         if (!hasMatchStarted)
                             return;
 
-                        roundData.PlantedSite = e.Site;
-                        roundData.PlantTime = demoParser.CurrentTime;
+                        round.PlantedSite = e.Site;
+                        round.PlantTime = demoParser.CurrentTime;
                     };
 
                     demoParser.BombDefused += (sender, e) =>
@@ -156,7 +205,7 @@ namespace CSGO_DemoPars
                         if (!hasMatchStarted)
                             return;
 
-                        roundData.DefuseTime = demoParser.CurrentTime;
+                        round.DefuseTime = demoParser.CurrentTime;
                     };
 
                     demoParser.FlashNadeExploded += (sender, e) =>
@@ -182,6 +231,8 @@ namespace CSGO_DemoPars
 
                     demoParser.TickDone += (sender, e) =>
                     {
+                        MultiProgressbar.UpdateProgress(reservedLine, fileName, demoParser.ParsingProgess);
+                        
                         if (!hasMatchStarted || !isFreezetimeOver)
                             return;
 
@@ -189,36 +240,54 @@ namespace CSGO_DemoPars
                         {
                             PositionData tickPositionData = new PositionData();
                             tickPositionData.MatchID = matchID;
+
                             tickPositionData.SteamID = p.SteamID;
                             tickPositionData.Tick = demoParser.CurrentTick;
-                            tickPositionData.Position = new Vector(p.Position.X, p.Position.Y, p.Position.Z);
-                            tickPositionData.ViewDirection = new Vector(p.ViewDirectionX, p.ViewDirectionY, 0);
-                            positionData.Add(tickPositionData);
-                            var strh = positionData.Where(ps => ps.SteamID == 76561198004011311 && ps.MatchID == 1);
+                            tickPositionData.Position = new MyVector(p.Position.X, p.Position.Y, p.Position.Z);
+                            tickPositionData.ViewDirection = new MyVector(p.ViewDirectionX, p.ViewDirectionY, 0);
+
+                            if (!position.ContainsKey(p.SteamID)) {
+                                position.Add(p.SteamID, new MyVector(p.Position.X, p.Position.Y, p.Position.Z));
+                                positionData.Add(tickPositionData);
+                            } else if (!position[p.SteamID].Equals(tickPositionData.Position)) {
+                                positionData.Add(tickPositionData);
+                            }
+
+                            if (!viewDirection.ContainsKey(p.SteamID)) viewDirection.Add(p.SteamID, new MyVector(p.ViewDirectionX, p.ViewDirectionY, 0));
+                            if (viewDirection[p.SteamID] == tickPositionData.ViewDirection) tickPositionData.ViewDirection = null;
+
+                            position[p.SteamID] = tickPositionData.Position;
                         }
                     };
 
                     demoParser.RoundEnd += (sender, e) =>
                     {
-                        if (!hasMatchStarted || round < 1)
+                        if (!hasMatchStarted || currentRound < 1)
                             return;
 
-                        roundData.Winner = e.Winner;
-                        roundData.RoundEndTime = demoParser.CurrentTime;
-                        long id = database.insertRound(roundData);
+                        round.Winner = e.Winner == Team.CounterTerrorist ? ctID : tID;
+                        round.WinnerSide = e.Winner;
+                        round.RoundEndTime = demoParser.CurrentTime;
+                        long id = database.insertRound(round);
 
                         foreach (KillData kill in roundKills)
                         {
                             kill.RoundID = id;
                             database.insertKill(kill);
                         }
-                        database.insertPosition(positionData);
-                        positionData.Clear();
+
+                        if (lastRoundHalf) {
+                            long temp = ctID;
+                            ctID = tID;
+                            tID = temp;
+                            lastRoundHalf = false;
+                        }
                     };
 
                     demoParser.WinPanelMatch += (sender, e) =>
                     {
-                        Console.WriteLine("match ended");
+                        database.insertPosition(positionData);
+                        positionData.Clear();
                         hasMatchStarted = false;
                     };
                     demoParser.ParseToEnd();

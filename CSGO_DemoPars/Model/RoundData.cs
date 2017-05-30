@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using DemoInfo;
 
 namespace CSGO_DemoPars.Model
 {
@@ -18,6 +19,7 @@ namespace CSGO_DemoPars.Model
         private float defuseTime;
         private char plantedSite;
         private long winner;
+        private DemoInfo.Team winnerSide;
 
         public void newRound()
         {
@@ -86,21 +88,16 @@ namespace CSGO_DemoPars.Model
             set { plantedSite = value; }
         }
 
-        public DemoInfo.Team Winner
+        public long Winner
         {
             get {
-                if (winner == ctID)
-                    return DemoInfo.Team.CounterTerrorist;
-                else if (winner == tID)
-                    return DemoInfo.Team.Terrorist;
-                else return DemoInfo.Team.Spectate;
+                return winner;
             }
             set {
-                if (value == DemoInfo.Team.CounterTerrorist)
-                    winner = ctID;
-                else if (value == DemoInfo.Team.Terrorist)
-                    winner = tID;
+                winner = value;
             }
         }
+
+        public Team WinnerSide { get => winnerSide; set => winnerSide = value; }
     }
 }
